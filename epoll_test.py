@@ -9,6 +9,7 @@ import select
 import traceback
 import json
 import multiprocessing
+from multiprocessing import Process, Manager, Value
 
 
 def handler1(request_dic):
@@ -54,7 +55,7 @@ def init_connection(server, connections, requests, responses, epoll):
     connection.setblocking(0)
 
     fd = connection.fileno()
-    epoll.register(fd, select.EPOLLIN | select.EPOLLHUP)
+    epoll.register(fd, select.EPOLLIN)
     connections[fd] = connection
     requests[fd] = ''
     responses[fd] = ''
@@ -92,7 +93,7 @@ def receive_request(fileno, requests, connections, responses, epoll):
         def wrapper(request_dic, response, fileno, handler):
             response[fileno] = json.dumps(handler(request_dic))
             print(response[fileno])
-            epoll.modify(fileno, select.EPOLLOUT | select.EPOLLHUP)
+            epoll.modify(fileno, select.EPOLLOUT)
 
         p = multiprocessing.Process(target=wrapper,
                 args=(request_dic, responses, fileno, handler2))
@@ -100,9 +101,7 @@ def receive_request(fileno, requests, connections, responses, epoll):
     else:
         print("Lightweighted load task...., process it in the main thread....")
         responses[fileno] = json.dumps(handler1(request_dic))
-        epoll.modify(fileno, select.EPOLLOUT | select.EPOLLHUP)
-
-
+        epoll.modify(fileno, select.EPOLLOUT)
 
 
 def send_response(fileno, connections, responses, epoll):
@@ -110,7 +109,7 @@ def send_response(fileno, connections, responses, epoll):
     print ("Begin to send data to {0}: {1}".format(fileno, responses[fileno].encode("utf-8")))
     byteswritten = connections[fileno].sendall(responses[fileno].encode("utf-8"))
     responses[fileno] = ''
-    epoll.modify(fileno, select.EPOLLIN | select.EPOLLHUP)
+    epoll.modify(fileno, select.EPOLLIN)
     print ("Response finished")
 
 def delete_client(fileno, connections, requests, responses, epoll):
@@ -124,7 +123,7 @@ def delete_client(fileno, connections, requests, responses, epoll):
 def run_server(socket_options, address):
     """Run a simple TCP server using epoll."""
     with socketcontext(*socket_options) as server, \
-            epollcontext(server.fileno(), select.EPOLLIN | select.EPOLLHUP) as epoll:
+            epollcontext(server.fileno(), select.EPOLLIN) as epoll:
 
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(address)
