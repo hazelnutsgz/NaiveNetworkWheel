@@ -7,12 +7,22 @@ from contextlib import contextmanager
 import socket
 import select
 import traceback
+import json
+import multiprocessing
 
-def handler1(str):
-    return str + ' hello~'
 
-def handler2(str):
-    return str + ''
+def handler1(request_dic):
+    return {
+        "status": True,
+        "content": "Light workload"
+    }
+
+def handler2(request_dic):
+    print ("LLLLLL")
+    return {
+        "status": True,
+        "content": "heavy workingload"
+    }
 
 @contextmanager
 def socketcontext(*args, **kwargs):
@@ -62,28 +72,44 @@ def receive_request(fileno, requests, connections, responses, epoll):
         if len(st) == 0:
             delete_client(fileno, connections, requests, responses, epoll)
             return
-
+        requests[fileno] += st
         while True:
             st = connections[fileno].recv(8).decode('utf-8')
             if len(st) == 0:
                 break
             requests[fileno] += st
     except socket.error:
+        print ("Error..")
         pass
 
     print("Read all the request data.... from {0}: {1}".format(fileno, requests[fileno]))
+    import pdb; pdb.set_trace()
 
-    epoll.modify(fileno, select.EPOLLOUT | select.EPOLLHUP)
-
-    responses[fileno] = 'Get your data.........'
+    request_dic = json.loads(requests[fileno])
     requests[fileno] = ''
+    if (request_dic["type"] == "h"):
+        print ("Heavy load task...., spawning a new process to handle....")
+        def wrapper(request_dic, response, fileno, handler):
+            response[fileno] = json.dumps(handler(request_dic))
+            print(response[fileno])
+            epoll.modify(fileno, select.EPOLLOUT | select.EPOLLHUP)
+
+        p = multiprocessing.Process(target=wrapper,
+                args=(request_dic, responses, fileno, handler2))
+        p.start()
+    else:
+        print("Lightweighted load task...., process it in the main thread....")
+        responses[fileno] = json.dumps(handler1(request_dic))
+        epoll.modify(fileno, select.EPOLLOUT | select.EPOLLHUP)
+
+
 
 
 def send_response(fileno, connections, responses, epoll):
     """Send a response to a client."""
     print ("Begin to send data to {0}: {1}".format(fileno, responses[fileno].encode("utf-8")))
     byteswritten = connections[fileno].sendall(responses[fileno].encode("utf-8"))
-    responses[fileno] = responses[fileno][byteswritten:]
+    responses[fileno] = ''
     epoll.modify(fileno, select.EPOLLIN | select.EPOLLHUP)
     print ("Response finished")
 
